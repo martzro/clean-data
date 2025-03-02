@@ -6,12 +6,15 @@ from csv import DictReader as csv_dict_reader
 from csv import writer as csv_writer
 import os
 import re
-
+from sqlite_regex import loadable_path
 
 class DB:
     def __init__(self):
         self.con = sqlite3.connect('db.db')
         self.cur = self.con.cursor()
+        self.con.enable_load_extension(True)
+        self.con.load_extension(loadable_path()) # https://github.com/asg017/sqlite-regex?tab=readme-ov-file
+        self.con.enable_load_extension(False)
         self.schema = {}
 
     def make_table(self, name, columns):
@@ -35,6 +38,16 @@ class DB:
         self.cur.executemany(query, list(map(tuple, values)))
         self.con.commit()
         print(f'inserted {len(values)} rows')
+
+    def update(self, table: str, set_values: list, where_values: list):
+        self.table_exists(table)
+        query = f"""UPDATE {table}
+                SET {','.join(set_values)}
+                WHERE 1=1 {' AND '.join(where_values)}
+                ;
+                """
+        self.cur.execute(query)
+        self.con.commit()
 
     def dedup(self, table: str, on: list, keep: str):
         self.table_exists(table)
@@ -69,6 +82,8 @@ class File:
         self.data = []
         self.columns = []
         self.column_name_regex = r'[^a-zA-Z0-9_]'
+        self.encoding_retrys = ['utf-8', 'cp1252', 'latin-1']
+        self.read_attempt = 0
         self._get_data_()
     
 
@@ -79,15 +94,24 @@ class File:
             return self.read_excel()
     
     def read_csv(self):
-        with open(self.file_name, mode='r', encoding='utf-8') as file:
-            self.data = [row for row in csv_reader(file)]
-            self.columns = [re.sub(self.column_name_regex, '', str(column).upper().strip().replace('/', ' ').replace(' ','_')) for column in self.data.pop(0)]
-        file.close()
+        try:
+            with open(self.file_name, mode='r', encoding=self.encoding_retrys[self.read_attempt]) as file:
+                self.data = [row for row in csv_reader(file)]
+                self.columns = [re.sub(self.column_name_regex, '', str(column).upper().strip().replace('/', ' ').replace(' ','_')) for column in self.data.pop(0)]
+            file.close()
+        except:
+            self.read_attempt += 1
+            print(f'Retrying: read_csv with encoding {self.encoding_retrys[self.read_attempt - 1]} failed trying with {self.encoding_retrys[self.read_attempt]}, file: {self.file_name}')
+            self.read_csv() # try again
 
-    def add_source_column(self):
+    def add_source_column(self, source: str= None):
         self.columns.append('SOURCE')
-        for i in range(len(self.data)):
-            self.data[i].append(self.file_name.replace('\\','/').split('/')[-1])
+        if not source:
+            for i in range(len(self.data)):
+                self.data[i].append(self.file_name.replace('\\','/').split('/')[-1])
+        else:
+            for i in range(len(self.data)):
+                self.data[i].append(source) # custom souce override
 
     def read_excel(self):
         data = excel_reader(self.file_name)
@@ -105,11 +129,10 @@ class File:
 
         self.columns = [self.columns[i] for i in range(len(self.columns)) if i in idx_to_keep]
         
-
-
 class Files:
     def __init__(self, files: list[File]):
         self.files = files
+        self.person_title_remove_regex = r'^(MR|MRS|MS|DR)\.?\s*|[^a-zA-Z\s]'
 
     def add_file(self, file: File):
         self.files.append(file)
@@ -153,9 +176,9 @@ class Files:
         self.column_counts = columns
         self.file_column_map = files_with_columns
 
-    def add_source_columns(self):
+    def add_source_columns(self, source: str=None):
         for file in self.files:
-            file.add_source_column()
+            file.add_source_column(source)
 
     def rename(self, columns: dict[str:str]):
         # update column map
@@ -176,9 +199,19 @@ class Files:
         # update columns
         self.get_unique_columns()
         # insert
-        self.db.make_table('staging', list(self.column_counts.keys()))
+        
+        try:
+            self.db.make_table('staging', list(self.column_counts.keys()))
+        except Exception as e:
+            print(list(self.column_counts.keys()))
+            print(self.column_counts)
+            print(e)
+            raise e
         for file in self.files:
-            self.db.insert('staging', file.columns, file.data)
+            try:
+                self.db.insert('staging', file.columns, file.data)
+            except:
+                print(file.columns, file.file_name)
 
     def dedup_staging(self, on: list=None, keep: str='1'):
         cols = list(self.column_counts.keys())
@@ -191,6 +224,16 @@ class Files:
             
         self.db.dedup(table='staging', on=on, keep=keep)
 
+    def clean_staging_person_name(self, column: str):
+        set_values = [f"""{column} = TRIM(
+                                        REGEX_REPLACE(
+                                            '{self.person_title_remove_regex}'
+                                            ,UPPER({column})
+                                            , ''
+                                        )
+                                        )
+                      """,]
+        self.db.update(table='staging', set_values=set_values, where_values=['1=1'])
 
 class Directory:
     def __init__(self, path):

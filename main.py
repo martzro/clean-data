@@ -30,7 +30,7 @@ files.split_and_choose('CLEANED_FULL_NAME', 'CLEANED_LAST_NAME', ' ', -1)
 #finalize column selection
 column_map = {'FIRST_NAME':'CLEANED_FIRST_NAME',
               'LAST_NAME':'CLEANED_LAST_NAME',
-              'COMPANY':'COMPANY',
+              'COMPANY':'CLEANED_COMPANY',
               'EMAIL':'CLEANED_EMAIL',
               'PHONE':'CLEANED_PHONE',
               'SOURCE':'SOURCE',

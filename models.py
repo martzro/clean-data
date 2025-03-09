@@ -375,7 +375,9 @@ class Files:
                        )
         
     def clean_staging_alphanum_doublespace(self, column: str):
-        set_values = [f"""{column} = UPPER(
+        new_column = f'CLEANED_{column}'
+        self.db.add_column_to_table('staging', new_column, 'text')
+        set_values = [f"""{new_column} = UPPER(
                                             TRIM(
                                                 REGEX_REPLACE(
                                                     '{self.replace_non_alnum_single_space}'
@@ -523,7 +525,7 @@ class Directory:
         self.end_time = time()
         self.duration = str(round(self.end_time - self.start_time, 0))
         logger.info('*'*50+'FINISHED'+'*'*50)
-        logger.info(f'* Duration: {self.duration} seconds'+'*'*108 - len(f'* Duration: {self.duration} seconds'))
+        logger.info(f'* Duration: {self.duration} seconds'+'*'*(108 - len(f'* Duration: {self.duration} seconds')))
         logger.info('*'*108)
     
 

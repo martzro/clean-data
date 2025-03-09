@@ -1,3 +1,5 @@
 clean-data/
 data/
 *.db
+*.log
+output/

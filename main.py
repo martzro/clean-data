@@ -17,6 +17,8 @@ files.clean_staging_person_name('FULL_NAME')
 files.clean_staging_person_name('FIRST_NAME')
 files.clean_staging_person_name('LAST_NAME')
 files.clean_staging_alphanum_doublespace('COMPANY')
+files.fill_null_with_x('LAST NAME')
+files.fill_null_with_x('COMPANY')
 files.clean_staging_phone()
 files.clean_staging_email()
 files.upper_trim_column('ADDRESS')
@@ -33,10 +35,10 @@ column_map = {'FIRST_NAME':'CLEANED_FIRST_NAME',
               'COMPANY':'CLEANED_COMPANY',
               'EMAIL':'CLEANED_EMAIL',
               'PHONE':'CLEANED_PHONE',
-              'SOURCE':'SOURCE',
-              'SUB_SOURCE': 'SUB_SOURCE',
+              'PROVIDER':'SOURCE', # CHANGED TO PROVIDER
+              'LEAD_TYPE': 'SUB_SOURCE', # CHANGED TO LEAD_TYPE
               'UCC_DATE': 'DATE_FROM_DATA',
-              'PURCHASE': 'DATE_FROM_FILE_NAME',
+              'PURCHASE_DATE': 'DATE_FROM_FILE_NAME', # CHANGED TO PURCHASE DATE
               'STATE_PROVENCE': 'STATE_PROVENCE',
             }
 

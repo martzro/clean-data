@@ -374,6 +374,18 @@ class Files:
                        where_values=[f"TRIM({column}) is not null"]
                        )
         
+    def fill_null_with_x(self, column):
+        set_values = [f'{column} = XxX',]
+        where_values = [f'trim({column}) is null']
+        try:
+            logger.info(f'filling nulls with XxX for staging.{column}')
+            self.db.update(table='staging',
+                           set_values=set_values,
+                           where_values=where_values
+                           )
+        except Exception as e:
+            logger.error(e)
+        
     def clean_staging_alphanum_doublespace(self, column: str):
         new_column = f'CLEANED_{column}'
         self.db.add_column_to_table('staging', new_column, 'text')

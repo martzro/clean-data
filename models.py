@@ -73,6 +73,7 @@ class DB:
                 {','.join([column+' TEXT(255)' for column in columns])}
                 );
                 """
+        logger.info(query)
         self.cur.execute(query)
         self.schema[name] = columns
 
@@ -196,11 +197,16 @@ class File:
     def read_csv(self):
         try:
             with open(self.file_name, mode='r', encoding=self.encoding_retrys[self.read_attempt]) as file:
-                self.data = [row for row in csv_reader(file)]
+                self.data = [row for row in csv_reader(file)] # if null ''
                 self.columns = [re.sub(self.column_name_regex, '', str(column).upper().strip().replace('/', ' ').replace(' ','_')) for column in self.data.pop(0)]
             file.close()
-        except:
+        except Exception as e:
             self.read_attempt += 1
+            if  type(e) == IndexError:
+                self.data = [['none']]
+                self.columns = ['remove']
+                logger.error(f'{e} {self.file_name}')
+                return
             logger.warning(f'Retrying: read_csv with encoding {self.encoding_retrys[self.read_attempt - 1]} failed trying with {self.encoding_retrys[self.read_attempt]}, file: {self.file_name}')
             self.read_csv() # try again
 
@@ -374,9 +380,10 @@ class Files:
                        where_values=[f"TRIM({column}) is not null"]
                        )
         
+    
     def fill_null_with_x(self, column):
-        set_values = [f'{column} = XxX',]
-        where_values = [f'trim({column}) is null']
+        set_values = [f"{column} = 'XxX'",]
+        where_values = [f"trim({column}) is null OR {column}=''"]
         try:
             logger.info(f'filling nulls with XxX for staging.{column}')
             self.db.update(table='staging',
@@ -412,6 +419,8 @@ class Files:
                                             WHEN {tgt_column} <> splitTextGetIndex({src_column}, '{delim}', {idx})
                                                 THEN   -- NAMES ARE DIFFERENT AND NOT NULL
                                                     CASE 
+                                                        WHEN '{tgt_column}'='{src_column}' -- CASE SAME COLUMN WE JUST WANT TO KEEP 1
+                                                            THEN splitTextGetIndex({src_column}, '{delim}', {idx})
                                                         WHEN LENGTH(splitTextGetIndex({src_column}, '{delim}', {idx})) >= {tgt_column}
                                                             THEN splitTextGetIndex({src_column}, '{delim}', {idx})
                                                         ELSE {tgt_column}
@@ -513,7 +522,7 @@ class Directory:
     
     def export_table_to_csv(self, rows_per_file: int = 500_000, fname: str = 'output'):
         logger.info(f'Exporting final table to {fname} in {rows_per_file} rows per file')
-        query = "select * from final"
+        query = "select * from final order by company_name asc"
         res = self.files.db.cur.execute(query)
         done = False
         c = count()
@@ -523,7 +532,7 @@ class Directory:
             data = res.fetchmany(rows_per_file)
             if data:
                 outfile = os.path.join(self.output_dir, f'{fname}_{next(c)}.csv')
-                with open(outfile, 'w', newline="") as file:
+                with open(outfile, 'w', newline="",encoding='utf-8') as file:
                     writer = csv_writer(file)
                     writer.writerow(columns)
                     writer.writerows(data)

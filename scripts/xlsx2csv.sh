@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # activate virtual env
-source ../clean-data/Scripts/activate
+source ../../clean-data/Scripts/activate
 # Path to the Python script
-PYTHON_SCRIPT="../xlsx2csv.py"
+PYTHON_SCRIPT="../../scripts/xlsx2csv.py"
 
 # Check if the Python script exists
 if [ ! -f "$PYTHON_SCRIPT" ]; then

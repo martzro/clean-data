@@ -32,7 +32,6 @@ done
 
 # Clear logs
 : > "$LOGS"
-
 venv="venv"
 if [[ ! -d "$venv" ]]; then
     echo "no virtual environment, making"
@@ -41,6 +40,8 @@ if [[ ! -d "$venv" ]]; then
     pip install -r requirements.txt
     exit
 fi
+
+source "$venv/Scripts/activate"
 
 # Drop tables if DB exists
 if [[ -f "$DB_FILE" ]]; then

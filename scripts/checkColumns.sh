@@ -1,8 +1,8 @@
 #!/bin/bash
 
-REFERENCE_CSV="../helper_files/column_names.csv"
-NEW_COLUMN_FILE="../helper_files/newcolumns.csv"
-LOGS="../scripts/logs.csv"
+REFERENCE_CSV="../../helper_files/column_names.csv"
+NEW_COLUMN_FILE="../../helper_files/newcolumns.csv"
+LOGS="../../scripts/logs.csv"
 
 # Check if the reference CSV exists
 if [ ! -f "$REFERENCE_CSV" ]; then

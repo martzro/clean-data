@@ -1,10 +1,7 @@
 #!/bin/bash
 
-output="../helper_files/filetracker.tsv"
+output="../../helper_files/filetracker.tsv"
 mkdir -p temp_extracted
-
-# Uncomment to reset the output file each run
-#echo -n "" > "$output"
 
 # Function to process extracted files
 process_extracted_files() {

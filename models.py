@@ -74,7 +74,7 @@ class DB:
     def make_table(self, name, columns):
         query = f"""
                 CREATE TABLE IF NOT EXISTS {name} (
-                {','.join([column+' TEXT(255)' for column in columns])}
+                {','.join([f'{column}'+' TEXT(255)' for column in columns])}
                 )
                 """
         logger.info(query)

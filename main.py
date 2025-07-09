@@ -8,11 +8,11 @@ outrows=argv[2]
 base_dir = 'data'
 
 sources = [
-  'PROLEADS'#,
-#   'DATAKING',
-#   'SALESPROSPECTS',
-#   'STACKED MCA',
-#   'TEXTING'
+  'PROLEADS',
+  'DATAKING',
+  'SALESPROSPECTS',
+  'VIPER',
+  'MERIDIAN'
 ]
 for source in sources:
   print(source)

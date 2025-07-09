@@ -1,5 +1,7 @@
-clean-data/
+venv/
 data/
 *.db
-*.log
 output/
+archive/
+DEMANDS
+logs.*

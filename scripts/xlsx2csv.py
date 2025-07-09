@@ -20,7 +20,14 @@ def excel_to_csv(file_name):
             
             # Construct the CSV file name
             csv_file_name = f"{base_name}_{sheet_name}.csv"
-            
+            # update file tracker
+            f = open('../helper_files/filetracker.tsv', 'r')
+            d = f.read()
+            f.close()
+            d = d.replace(file_name, csv_file_name)
+            f = open('../helper_files/filetracker.tsv', 'w')
+            f.write(d)
+            f.close()
             # Open a new CSV file for writing
             with open(csv_file_name, mode='w', newline='', encoding='utf-8') as csv_file:
                 writer = csv.writer(csv_file)

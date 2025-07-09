@@ -1,14 +1,18 @@
 from models import Directory
 import os
+from sys import argv
+
+outname = argv[1]
+outrows=argv[2]
 
 base_dir = 'data'
 
 sources = [
-  'PROLEADS',
-  'DATAKING',
-  'SALESPROSPECTS',
-  'STACKED MCA',
-  #'TEXTING'
+  'PROLEADS'#,
+#   'DATAKING',
+#   'SALESPROSPECTS',
+#   'STACKED MCA',
+#   'TEXTING'
 ]
 for source in sources:
   print(source)
@@ -41,6 +45,7 @@ files.split_and_choose(src_column='CLEANED_FULL_NAME', tgt_column='CLEANED_FIRST
 files.split_and_choose(src_column='CLEANED_FULL_NAME', tgt_column='CLEANED_LAST_NAME', delim=' ', idx=-1)
 files.split_and_choose(src_column='CLEANED_FIRST_NAME', tgt_column='CLEANED_LAST_NAME', delim=' ', idx=1) # if last name null and first name has 2 use second
 files.split_and_choose(src_column='CLEANED_FIRST_NAME', tgt_column='CLEANED_FIRST_NAME', delim=' ', idx=0) # if name has spaces remove second
+files.fill_null_with_x('CLEANED_FIRST_NAME')
 files.fill_null_with_x('CLEANED_LAST_NAME')
 files.fill_null_with_x('CLEANED_COMPANY')
 #finalize column selection
@@ -57,10 +62,9 @@ column_map = {'FIRST_NAME':'CLEANED_FIRST_NAME',
             }
 
 files.final(column_map=column_map)
-directory.export_table_to_csv(rows_per_file=500_000, fname='multisource-3-23')
-
-#RAMCHH1981
-
+files.aggregate()
+directory.export_table_to_file('aggregated', rows_per_file=int(outrows), fname=outname, fmt='csv',delimiter=',')
+files.db.con.close()
 
 
 

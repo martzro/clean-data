@@ -1,8 +1,7 @@
 from openpyxl import reader as excel_reader
-from openpyxl import writer as excel_writer
 import sqlite3
+from datetime import datetime, timedelta
 from csv import reader as csv_reader
-from csv import DictReader as csv_dict_reader
 from csv import writer as csv_writer
 import os
 import re
@@ -11,6 +10,7 @@ import logging
 from itertools import count
 from pathlib import Path
 from time import time
+#from dateparser import parse
 
 logging.basicConfig(
     filename='logs.log',
@@ -51,6 +51,9 @@ def _function_title_string(text):
         return None
     return str(text).title()
 
+def _function_re_sub(pattern,string):
+    return re.sub(pattern=pattern,string=string,repl='')
+
 class DB:
     def __init__(self):
         self.con = sqlite3.connect('db.db')
@@ -65,13 +68,14 @@ class DB:
         self.con.create_function("parsePhone", 1, _function_extract_numbers_format_phone)
         self.con.create_function("parseEmail", 1, _function_clean_email_address)
         self.con.create_function("title", 1, _function_title_string)
+        self.con.create_function("reSub", 2, _function_re_sub)
 
 
     def make_table(self, name, columns):
         query = f"""
                 CREATE TABLE IF NOT EXISTS {name} (
                 {','.join([column+' TEXT(255)' for column in columns])}
-                );
+                )
                 """
         logger.info(query)
         self.cur.execute(query)
@@ -148,23 +152,118 @@ class File:
         self.encoding_retrys = ['utf-8', 'cp1252', 'latin-1']
         self.read_attempt = 0
         self._get_data_()
+        self.file_tracker = 'helper_files/filetracker.tsv'
+        self.file_tracker_data = {}
+        self.load_file_tracker()
+        self.attempt = 0
     
     def set_date(self, date):
         self.date = date
         self.add_date_column()
+    
+    def load_file_tracker(self):
+        if os.path.isfile(self.file_tracker):
+            with open(self.file_tracker, 'r') as f:
+                for line in f.read().split('\n'):
+                    l=line.split('\t')
+                    if len(l) == 2:
+                        self.file_tracker_data[l[1]] = l[0]
+            f.close()
     
     def set_sub_source(self, sub_source):
         self.sub_source = sub_source
         logger.info(self.file_name+' ==> '+self.sub_source)
         self.add_sub_source_column()
 
-    def extract_date_from_file_name(self):
-        pattern = r'[\d]{5,9}'
-        matches = re.findall(pattern=pattern, string=self.file_name)
-        if matches:
-            match = matches[0]
-            if len(match) == 6:
-                self.set_date(f'{match[0:2]}-{match[2:4]}-{match[4:6]}')
+    def parse(self, date_string: str, date_formats: list):
+        for date_format in date_formats:
+
+            try:
+                parsed = datetime.strptime(date_string, date_format)
+                if parsed.year == 1900:
+                    parsed = parsed + timedelta(days=365*(datetime.now().year - 1900)) # make it this year
+
+                if parsed > datetime.now() or parsed.year < 2020:
+                    #print(parsed,' greater than today or less than 2020')
+                    continue
+                else:
+                    return parsed
+            except:
+                continue
+        return None
+
+    
+    def extract_date_from_file_name(self,file=None):
+            
+        patterns_numeric = [r'[\d]{4,9}',r'(\d{1,2})\s(\d{1,2})\s(\d{4}|\d{2})',r'(\d{1,2})\s(\d{2,4})']
+        patterns_months = [r"(\d{1,2})\s([A-Za-z]+)\s(\d{4})", r"([A-Za-z]{3,9})\s(\d{4}|\d{2})", r"\d202\d\b",
+                           r"(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)",
+                            r"(JAN|FEB|MAR|APR|MAY|JUNE|JUL|AUG|SEP|OCT|NOV|DEC)",
+
+                           ]
+        date_formats_numeric=['%d%m%y','%d%m%Y','%m%d%y','%m%d%Y','%d %m %y','%d %m %Y','%m %d %y','%m %d %Y','%m %y','%Y']
+        date_format_months = ['%B %Y','%b %Y', '%d %B %Y', '%d %b %Y', '%d %b %y', '%Y', '%B', '%b']
+        output_format = '%m-%d-%Y'
+        if not file:
+            file = self.file_name
+        filename = file.upper().replace('.',' ').replace('-',' ').replace('_',' ').replace('(', ' ')
+
+        string_numeric=re.sub('[^\d]{4,9}', ' ',filename)
+        logger.info(f'matching dates to: {string_numeric}')
+        max_date_numeric = 8
+        for pattern in patterns_numeric:
+            matches = []
+            if len(string_numeric) > max_date_numeric:
+                for i in range(len(string_numeric) - max_date_numeric):
+                    # sliding window of dates so regex covers full string
+                    res = re.findall(pattern=pattern, string=string_numeric[i:i+max_date_numeric])
+                    if res:
+                        matches += res
+            else:
+                matches = re.findall(pattern=pattern, string=string_numeric)
+
+            if matches:
+                for date_string in matches:
+                    if type(date_string) == list or type(date_string) == tuple:
+                        date_string = ' '.join([str(int(i)) for i in date_string])
+                    else:
+                        try:
+                            date_string = str(int(date_string)) # remove leading zeros
+                        except:
+                            continue # skip rest if its not only digits
+                    logger.info(f'found match {date_string} parsing date')
+                    parsed = self.parse(date_string=date_string, date_formats=date_formats_numeric)
+                    if parsed:
+                        logger.info(f'matched date {parsed}')
+                        self.set_date(parsed.strftime(output_format))
+                        return
+        logger.info(f'no numeric matches. checking full months, matching dates to: {filename}')
+        for pattern in patterns_months:
+            matches = re.findall(pattern=pattern, string=filename)
+            if matches:
+                for match in matches:
+                    if type(match) == list or type(match) == tuple:
+                        match = ' '.join(match)
+                    logger.info(f'found match {match} parsing date')
+                    parsed = self.parse(date_string=match, date_formats=date_format_months)
+                    if parsed:
+                        logger.info(f'matched date {parsed}')
+                        self.set_date(parsed.strftime(output_format))
+                        return
+        
+        if self.attempt > 0:
+            logger.warning(f'no matches found for {filename}')
+            return
+        else:
+            self.attempt +=1 
+            f=self.file_name.replace('\\','/').split('/')[-1]
+            folder = self.file_tracker_data.get(f)
+            if folder:
+                logger.warning(f'no matches found for {f}, trying with parent folder {folder}')
+                self.extract_date_from_file_name(folder)
+            else:
+                logger.warning(f'no matches found for {f}, no parent folder: {folder}')
+                return
 
     def _sliceby(self, string:str, delim: str, before: bool):
         idx = 0 if before else -1
@@ -257,7 +356,7 @@ class File:
 class Files:
     def __init__(self, files: list[File]):
         self.files = files
-        self.person_title_remove_regex = r'^(MR|MRS|MS|DR)\.?\s*|[^a-zA-Z\s]'
+        self.person_title_remove_regex = r'^(?:MR|MRS|MS|DR)\.?\s*|[^a-zA-Z\s]'
         self.replace_non_alnum_single_space = r"[^a-zA-Z0-9]+|\s{2,}" 
         self.number_regex = r"[^\d]" 
 
@@ -266,6 +365,7 @@ class Files:
 
     def rename_common_columns(self):
         rename_list = File('csv', 'helper_files/column_names.csv')
+        #print(rename_list.data)
         # need lookup columns in same fmt as real ones
         rename_dict = {re.sub(r'[^a-zA-Z0-9_]', '', str(a).upper().strip().replace('/', ' ').replace(' ','_')):b for a,b in rename_list.data}
         self.rename(rename_dict)
@@ -338,7 +438,7 @@ class Files:
         # update columns
         self.get_unique_columns()
         # insert
-        
+        #print(self.column_counts)
         try:
             self.db.make_table('staging', list(self.column_counts.keys()))
 
@@ -367,13 +467,12 @@ class Files:
         self.db.add_column_to_table('staging', new_column, 'text')
         set_values = [f"""{new_column} = TITLE(
                                                 TRIM(
-                                                    REGEX_REPLACE(
+                                                    reSub(
                                                         '{self.person_title_remove_regex}'
-                                                        ,{column}
-                                                        , ''
+                                                        ,upper({column})
+                                                        )
                                                     )
                                                 )
-                                            )
                       """,]
         self.db.update(table='staging', 
                        set_values=set_values, 
@@ -396,15 +495,17 @@ class Files:
     def clean_staging_alphanum_doublespace(self, column: str):
         new_column = f'CLEANED_{column}'
         self.db.add_column_to_table('staging', new_column, 'text')
-        set_values = [f"""{new_column} = UPPER(
-                                            TRIM(
-                                                REGEX_REPLACE(
-                                                    '{self.replace_non_alnum_single_space}'
-                                                    ,{column}
-                                                    , ' ' -- WE REMOVE SPACE SO NEED TO ADD BACK
+        set_values = [f"""{new_column} = REPLACE(
+                                            UPPER(
+                                                TRIM(
+                                                    REGEX_REPLACE(
+                                                        '{self.replace_non_alnum_single_space}'
+                                                        ,{column}
+                                                        , ' ' -- WE REMOVE SPACE SO NEED TO ADD BACK
+                                                    )
                                                 )
                                             )
-                                        )
+                                        ,',','')
                       """,]
         self.db.update(table='staging', 
                        set_values=set_values, 
@@ -501,6 +602,35 @@ class Files:
         logger.info(insert_statement)
         self.db.cur.execute(insert_statement)
         self.db.con.commit()
+
+    def aggregate(self):
+        self.db.make_table('aggregated',['FIRST_NAME','LAST_NAME','COMPANY_NAME','EMAIL','PHONE',
+                                         'PROVIDERS','UCC_DATE','PURCHASE_DATE','STATE']
+                            )
+        self.db.con.commit()
+        query = """
+                INSERT INTO AGGREGATED (FIRST_NAME,LAST_NAME,COMPANY_NAME,EMAIL,PHONE,
+                PROVIDERS,UCC_DATE,PURCHASE_DATE,STATE)
+                    SELECT
+                    FIRST_NAME,
+                    LAST_NAME,
+                    COMPANY_NAME,
+                    group_concat( DISTINCT EMAIL) AS EMAIL,
+                    group_concat( DISTINCT PHONE) AS PHONE,
+                    group_concat( DISTINCT PROVIDER||'-'||LEAD_TYPE) AS PROVIDERS,
+                    group_concat( DISTINCT UCC_DATE) AS UCC_DATE,
+                    group_concat( DISTINCT PURCHASE_DATE) AS PURCHASE_DATE,
+                    group_concat( DISTINCT STATE) AS STATE
+                FROM 
+                FINAL
+                GROUP BY 
+                    FIRST_NAME,
+                    LAST_NAME,
+                    COMPANY_NAME
+            """
+        self.db.cur.execute(query)
+        self.db.con.commit()
+
 class Directory:
     def __init__(self, path):
         self.start_time = time()
@@ -520,9 +650,9 @@ class Directory:
 
         return self.files
     
-    def export_table_to_csv(self, rows_per_file: int = 500_000, fname: str = 'output'):
+    def export_table_to_file(self,table: str='final',rows_per_file: int = 500_000, fname: str = 'output',fmt: str='csv',delimiter:str=','):
         logger.info(f'Exporting final table to {fname} in {rows_per_file} rows per file')
-        query = "select * from final order by company_name asc"
+        query = f"select * from {table} order by company_name asc"
         res = self.files.db.cur.execute(query)
         done = False
         c = count()
@@ -531,9 +661,9 @@ class Directory:
         while not done:
             data = res.fetchmany(rows_per_file)
             if data:
-                outfile = os.path.join(self.output_dir, f'{fname}_{next(c)}.csv')
+                outfile = os.path.join(self.output_dir, f'{fname}_{next(c)}.{fmt}')
                 with open(outfile, 'w', newline="",encoding='utf-8') as file:
-                    writer = csv_writer(file)
+                    writer = csv_writer(file, delimiter=delimiter)
                     writer.writerow(columns)
                     writer.writerows(data)
                 file.close()

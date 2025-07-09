@@ -1,9 +1,8 @@
 #!/bin/bash
 
-
-REFERENCE_CSV="../../helper_files/column_names.csv"
-NEW_COLUMN_FILE="../../helper_files/newcolumns.csv"
-LOGS="../../scripts/logs.csv"
+REFERENCE_CSV="../helper_files/column_names.csv"
+NEW_COLUMN_FILE="../helper_files/newcolumns.csv"
+LOGS="../scripts/logs.csv"
 
 # Check if the reference CSV exists
 if [ ! -f "$REFERENCE_CSV" ]; then
@@ -55,6 +54,7 @@ for file in *.csv; do
         for ref_column in "${reference_columns[@]}"; do
             if [[ "$trimmed_column" == "$ref_column" ]]; then
                 match_found=true
+                echo "$trimmed_column,$ref_column,$file" >> "$LOGS"
                 break
             fi
         done

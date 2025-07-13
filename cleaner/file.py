@@ -1,145 +1,10 @@
 from openpyxl import reader as excel_reader
-import sqlite3
 from datetime import datetime, timedelta
 from csv import reader as csv_reader
-from csv import writer as csv_writer
 import os
 import re
-from sqlite_regex import loadable_path
-import logging
-from itertools import count
-from pathlib import Path
-from time import time
-#from dateparser import parse
-
-logging.basicConfig(
-    filename='logs.log',
-    level=logging.INFO,
-    format='%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-)
-
-logger = logging.getLogger(__name__)
-
-# sqlite functions
-def _function_split_text_get_index(text, delim, index):
-    if index >= 0:
-        try:
-            return text.split(delim)[index].title()
-        except:
-            return None
-    else:
-        return text.split(delim)[index].title() if len(text.split(delim)) > 1 else None
-    
-def _function_extract_numbers_format_phone(phone):
-    
-    phonevals = re.sub(pattern=r'[^\d]', repl='', string=str(phone))
-    if phonevals:
-        phonevals = str(phonevals)
-        if len(phone) < 10:
-            return None
-        return "("+phonevals[-10:-7]+") "+phonevals[-7:-4]+"-"+phonevals[-4:]
-    
-def _function_clean_email_address(email):
-    if '@' and '.' in email:
-        return email.upper().strip()
-    else:
-        return None
-    
-def _function_title_string(text):
-    if not text:
-        return None
-    return str(text).title()
-
-def _function_re_sub(pattern,string):
-    return re.sub(pattern=pattern,string=string,repl='')
-
-class DB:
-    def __init__(self):
-        self.con = sqlite3.connect('db.db')
-        self.cur = self.con.cursor()
-        self.con.enable_load_extension(True)
-        self.con.load_extension(loadable_path()) # https://github.com/asg017/sqlite-regex?tab=readme-ov-file
-        self.con.enable_load_extension(False)
-        self.schema = {}
-
-        # define functions
-        self.con.create_function("splitTextGetIndex", 3, _function_split_text_get_index)
-        self.con.create_function("parsePhone", 1, _function_extract_numbers_format_phone)
-        self.con.create_function("parseEmail", 1, _function_clean_email_address)
-        self.con.create_function("title", 1, _function_title_string)
-        self.con.create_function("reSub", 2, _function_re_sub)
-
-
-    def make_table(self, name, columns):
-        query = f"""
-                CREATE TABLE IF NOT EXISTS {name} (
-                {','.join([f'{column}'+' TEXT(255)' for column in columns])}
-                )
-                """
-        logger.info(query)
-        self.cur.execute(query)
-        self.schema[name] = columns
-
-    def add_column_to_table(self, table, column, dtype):
-        query = f"""ALTER TABLE {table}
-                    ADD COLUMN {column} {dtype}
-                """
-        self.cur.execute(query)
-        self.con.commit()
-
-    def insert(self, table: str, columns: list, values: list[tuple]):
-        self.table_exists(table)       
-        query = f"""
-                INSERT INTO {table}
-                ({','.join(column for column in columns)})
-                VALUES
-                ({','.join(['?' for i in range(len(columns))])})
-                ;
-                """
-        try:
-            self.cur.executemany(query, list(map(tuple, values)))
-        except Exception as e:
-            logger.error(e, list(filter(lambda x: len(x) < len(columns), list(map(tuple, values))))[0],columns)
-        self.con.commit()
-        logger.info(f'inserted {len(values)} rows')
-
-    def update(self, table: str, set_values: list, where_values: list=[]):
-        self.table_exists(table)
-        query = f"""UPDATE {table}
-                SET {','.join(set_values)}
-                WHERE 1=1 AND {' AND '.join(where_values)}
-                ;
-                """
-        logger.info(query)
-        self.cur.execute(query)
-        self.con.commit()
-
-    def dedup(self, table: str, on: list, keep: str):
-        self.table_exists(table)
-        query = f"""
-        with 
-            DUPS AS (
-                SELECT 
-                        ROWID
-                    ,   ROW_NUMBER() OVER (PARTITION BY {','.join(on)}) AS ROWNUM
-                FROM {table}
-            )
-            DELETE FROM {table} WHERE ROWID IN (SELECT ROWID FROM DUPS WHERE ROWNUM <> {keep})
-        """
-
-        before = self.cur.execute(f'select count(1) from {table}').fetchone()[0]
-        self.cur.execute(query)
-        after = self.cur.execute(f'select count(1) from {table}').fetchone()[0]
-        logger.info(f'deleted {before-after} rows')
-        self.con.rollback()
-
-
-
-        
-    def table_exists(self, table):
-        if not self.schema.get(table):
-            raise NameError(f'{table} does not exist')     
+from .logger import logger
+from .db import DB
 
 class File:
     def __init__(self, file_type: str, file_name: str):
@@ -203,7 +68,7 @@ class File:
                            ]
         date_formats_numeric=['%d%m%y','%d%m%Y','%m%d%y','%m%d%Y','%d %m %y','%d %m %Y','%m %d %y','%m %d %Y','%m %y','%Y']
         date_format_months = ['%B %Y','%b %Y', '%d %B %Y', '%d %b %Y', '%d %b %y', '%Y', '%B', '%b']
-        output_format = '%m-%d-%Y'
+        output_format = '%Y-%m-%d' # default sqlite date format
         if not file:
             file = self.file_name
         filename = file.upper().replace('.',' ').replace('-',' ').replace('_',' ').replace('(', ' ')
@@ -478,8 +343,7 @@ class Files:
                        set_values=set_values, 
                        where_values=[f"TRIM({column}) is not null"]
                        )
-        
-    
+
     def fill_null_with_x(self, column):
         set_values = [f"{column} = 'XxX'",]
         where_values = [f"trim({column}) is null OR {column}=''"]
@@ -491,7 +355,7 @@ class Files:
                            )
         except Exception as e:
             logger.error(e)
-        
+    
     def clean_staging_alphanum_doublespace(self, column: str):
         new_column = f'CLEANED_{column}'
         self.db.add_column_to_table('staging', new_column, 'text')
@@ -548,17 +412,17 @@ class Files:
                        set_values=set_values,
                        where_values=where_values
                        )
-        
+
     def clean_staging_phone(self):
         self.db.add_column_to_table('staging', 'CLEANED_PHONE', 'text')
         set_values = [f"""CLEANED_PHONE = parsePhone(PHONE)
                       """,]
-                
+
         self.db.update(table='staging',
                        set_values=set_values,
                        where_values=["LENGTH(TRIM(PHONE)) >= 10"]
                        )
-        
+
     def clean_staging_email(self):
         self.db.add_column_to_table('staging', 'CLEANED_EMAIL', 'text')
         set_values = [f"""CLEANED_EMAIL = parseEmail(EMAIL)
@@ -577,6 +441,175 @@ class Files:
                        set_values=set_values,
                        where_values=[f"TRIM({column}) IS NOT NULL"]
                        )
+        
+    def match_state_with_full_record(self):
+        logger.info('matching states')
+        get_people_null_state = '''select distinct CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY 
+                                    from staging
+                                    where trim(state_provence) is null
+                                '''
+        get_state_match = '''select
+                                state_provence
+                            from staging
+                            where trim(state_provence) is not null
+                            and cleaned_first_name = :cleaned_first_name
+                            and cleaned_last_name = :cleaned_last_name
+                            and cleaned_company = :cleaned_company
+                            group by 
+                                cleaned_first_name,
+                                cleaned_last_name,
+                                cleaned_company,
+                                state_provence
+                            having count(1) = 1
+                                '''
+        res = self.db.cur.execute(get_people_null_state).fetchall() # need to fetch all bc single thread
+        
+        for cleaned_first_name,cleaned_last_name,cleaned_company in res:
+            resp = self.db.cur.execute(get_state_match,
+                                           {'cleaned_first_name':cleaned_first_name,
+                                                       'cleaned_last_name': cleaned_last_name,
+                                                       'cleaned_company': cleaned_company})
+            
+            state = resp.fetchall()
+            if len(state) == 1:
+                self.db.update('staging',
+                               [f"state_provence='{state[0][0]}'"],
+                               ['trim(state_provence) is null',f"cleaned_first_name='{cleaned_first_name}'",
+                                f"cleaned_last_name='{cleaned_last_name}'",f"cleaned_company='{cleaned_company}'"])
+                logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added state {state}')
+            # else:
+            #     logger.warning(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} no state {state}')
+        return
+    
+    def match_email_with_full_record(self):
+        logger.info('matching emails')
+        self.db.make_index('staging_phone','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_PHONE)')
+        self.db.make_index('staging_email','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_EMAIL)')
+        self.db.make_index('staging_record','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_EMAIL,CLEANED_PHONE)')
+
+        get_people_null_email = '''select distinct CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_PHONE 
+                                    from staging
+                                    where trim(CLEANED_EMAIL) is null and CLEANED_PHONE is not null
+                                '''
+        get_email_match = '''select
+                                CLEANED_EMAIL
+                            from staging
+                            where trim(CLEANED_EMAIL) is not null
+                            and cleaned_first_name = :cleaned_first_name
+                            and cleaned_last_name = :cleaned_last_name
+                            and cleaned_company = :cleaned_company
+                            and cleaned_phone = :cleaned_phone
+                            group by 
+                                cleaned_first_name,
+                                cleaned_last_name,
+                                cleaned_company,
+                                cleaned_email,
+                                cleaned_phone
+                            having count(1) > 0
+                                '''
+        logger.info('opening null email cursor')
+        res = self.db.cur.execute(get_people_null_email).fetchall() # need to fetch all bc single thread
+        update_sql = '''update staging 
+                        set cleaned_email=:cleaned_email 
+                        where 
+                            cleaned_email is null 
+                            and cleaned_phone=:cleaned_phone 
+                            and cleaned_first_name=:cleaned_first_name 
+                            and cleaned_last_name=:cleaned_last_name 
+                            and cleaned_company=:cleaned_company
+                        '''
+        logger.info('iterating null email users')
+        for cleaned_first_name,cleaned_last_name,cleaned_company,cleaned_phone in res:
+            resp = self.db.cur.execute(get_email_match,
+                                       {'cleaned_first_name':cleaned_first_name,
+                                        'cleaned_last_name': cleaned_last_name,
+                                        'cleaned_company': cleaned_company,
+                                        'cleaned_phone':cleaned_phone})
+            
+            email = resp.fetchall()
+
+            if len(email) > 0:
+                try:
+                    self.db.cur.execute(update_sql,
+                                        {'cleaned_first_name':cleaned_first_name,
+                                        'cleaned_last_name': cleaned_last_name,
+                                        'cleaned_company': cleaned_company,
+                                        'cleaned_phone':cleaned_phone,
+                                        'cleaned_email':email[0][0]})
+                except Exception as e:
+                    logger.warning(f' {e} f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} failed to add email {email}')
+                    continue
+                else:
+                    logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added email {email}')
+
+        self.db.con.commit()
+        return
+    
+    def match_email_with_full_record(self):
+        logger.info('matching emails')
+        self.db.make_index('staging_phone','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_PHONE)')
+        self.db.make_index('staging_email','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_EMAIL)')
+        self.db.make_index('staging_record','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_EMAIL,CLEANED_PHONE)')
+
+        get_people_null_phone = '''select distinct CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,cleaned_email 
+                                    from staging
+                                    where trim(cleaned_phone) is null and cleaned_email is not null
+                                '''
+        get_phone_match = '''select
+                                cleaned_phone
+                            from staging
+                            where trim(cleaned_phone) is not null
+                            and cleaned_first_name = :cleaned_first_name
+                            and cleaned_last_name = :cleaned_last_name
+                            and cleaned_company = :cleaned_company
+                            and cleaned_email = :cleaned_email
+                            group by 
+                                cleaned_first_name,
+                                cleaned_last_name,
+                                cleaned_company,
+                                cleaned_email,
+                                cleaned_phone
+                            having count(1) > 0
+                                '''
+        logger.info('opening null phone cursor')
+        res = self.db.cur.execute(get_people_null_phone).fetchall() # need to fetch all bc single thread
+        update_sql = '''update staging 
+                        set cleaned_phone=:cleaned_phone 
+                        where 
+                            cleaned_phone is null 
+                            and cleaned_email=:cleaned_email 
+                            and cleaned_first_name=:cleaned_first_name 
+                            and cleaned_last_name=:cleaned_last_name 
+                            and cleaned_company=:cleaned_company
+                        '''
+        logger.info('iterating null phone users')
+        for cleaned_first_name,cleaned_last_name,cleaned_company,cleaned_email in res:
+            resp = self.db.cur.execute(get_phone_match,
+                                       {'cleaned_first_name':cleaned_first_name,
+                                        'cleaned_last_name': cleaned_last_name,
+                                        'cleaned_company': cleaned_company,
+                                        'cleaned_email':cleaned_email})
+            
+            phone = resp.fetchall()
+
+            if len(phone) > 0:
+                try:
+                    self.db.cur.execute(update_sql,
+                                        {'cleaned_first_name':cleaned_first_name,
+                                        'cleaned_last_name': cleaned_last_name,
+                                        'cleaned_company': cleaned_company,
+                                        'cleaned_phone':phone[0][0],
+                                        'cleaned_email':cleaned_email})
+                except Exception as e:
+                    logger.warning(f' {e} f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} failed to add phone {phone}')
+                    continue
+                else:
+                    logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added phone {phone}')
+
+        self.db.con.commit()
+        return
+
+
     def make_number_value(self, column):
         set_values = [f"""{column} = TRIM(
                                             REGEX_REPLACE(
@@ -595,13 +628,20 @@ class Files:
     
     def final(self, column_map: dict):
         logger.info(f'moving data to final table: {column_map}')
+
+        self.make_lead_table() # make and populate client person table
+        
         self.db.make_table('final', list(column_map.keys()))
         insert_statement = f"""INSERT INTO FINAL ({','.join(i for i in column_map.keys())})
-                                SELECT {','.join(i for i in column_map.values())} FROM STAGING
+                                SELECT DISTINCT {','.join(i for i in column_map.values())} FROM STAGING
                             """
         logger.info(insert_statement)
         self.db.cur.execute(insert_statement)
         self.db.con.commit()
+
+        self.db.make_index('final_company','final(company_name)')
+        self.db.make_index('final_lead_id','final(lead_id)')
+        self.db.make_index('final_record','final(first_name,last_name,company_name)')
 
     def aggregate(self):
         self.db.make_table('aggregated',['FIRST_NAME','LAST_NAME','COMPANY_NAME','EMAIL','PHONE',
@@ -631,53 +671,49 @@ class Files:
         self.db.cur.execute(query)
         self.db.con.commit()
 
-class Directory:
-    def __init__(self, path):
-        self.start_time = time()
-        logger.info('*'*50+'STARTING'+'*'*50)
-        self.path=path
-        self.files = None
-        self.output_dir = 'output'
-        Path(self.output_dir).mkdir(exist_ok=True, parents=True)
-    
-    def get_csv_files(self):
-        files = Files([File('csv', os.path.join(self.path, file)) for file in os.listdir(self.path) if file.endswith('.csv')])
-        if self.files:
-            for file in files:
-                self.files.add_file(file)
-        else:
-            self.files = files
+    def populate_lead_table(self) -> None:
+        logger.info('populating lead table')
+        sql_insert = '''insert or ignore into client_person(lead_id,first_name,last_name,company)
+        values (?,?,?,?)'''
 
-        return self.files
-    
-    def export_table_to_file(self,table: str='final',rows_per_file: int = 500_000, fname: str = 'output',fmt: str='csv',delimiter:str=','):
-        logger.info(f'Exporting final table to {fname} in {rows_per_file} rows per file')
-        query = f"select * from {table} order by company_name asc"
-        res = self.files.db.cur.execute(query)
-        done = False
-        c = count()
-        next(c) # start at 1
-        columns = [i[0] for i in self.files.db.cur.description]
-        while not done:
-            data = res.fetchmany(rows_per_file)
-            if data:
-                outfile = os.path.join(self.output_dir, f'{fname}_{next(c)}.{fmt}')
-                with open(outfile, 'w', newline="",encoding='utf-8') as file:
-                    writer = csv_writer(file, delimiter=delimiter)
-                    writer.writerow(columns)
-                    writer.writerows(data)
-                file.close()
-                logger.info(f'Wrote {rows_per_file} rows to {outfile}')
-            else:
-                done = True
-        self.done()
+        sql_get_data = '''
+                select 
+                    make_lead_id(a.cleaned_first_name,a.cleaned_last_name,a.cleaned_company),
+                    a.cleaned_first_name,
+                    a.cleaned_last_name,
+                    a.cleaned_company
+                from (
+                    select distinct cleaned_first_name,cleaned_last_name,cleaned_company from staging) a'''
+        data = self.db.cur.execute(sql_get_data).fetchall()
+        
+        self.db.cur.executemany(sql_insert,data)
+        self.db.con.commit()
 
-    def done(self):
-        self.end_time = time()
-        self.duration = str(round(self.end_time - self.start_time, 0))
-        logger.info('*'*50+'FINISHED'+'*'*50)
-        logger.info(f'* Duration: {self.duration} seconds'+'*'*(108 - len(f'* Duration: {self.duration} seconds')))
-        logger.info('*'*108)
+        return
     
+    def populate_lead_id_column(self):
+        logger.info('populating lead id column in staging')
+        self.db.update('staging',
+                       ['''lead_id=(select client_person.lead_id from client_person 
+                    join staging 
+                    on client_person.first_name=staging.cleaned_first_name
+                    and client_person.last_name=staging.cleaned_last_name
+                    and client_person.company=staging.cleaned_company)'''
+                        ],
+                    ['lead_id is null'])
+        
+    
+    def make_lead_table(self) -> None:
+        logger.info('making lead table')
+        self.db.make_table('client_person',['lead_id','first_name','last_name','company_name'])
+        self.populate_lead_table()
 
+        self.db.make_index('client_person_company','client_person(company_name)')
+        self.db.make_index('client_person_lead_id','client_person(lead_id)')
+        self.db.make_index('client_person_record','client_person(first_name,last_name,company_name)',True)
+
+        self.db.add_column_to_table('staging','lead_id','text')
+        self.populate_lead_id_column()
+        
+        return
 

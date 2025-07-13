@@ -61,6 +61,7 @@ files.fill_null_with_x('CLEANED_LAST_NAME')
 files.fill_null_with_x('CLEANED_COMPANY')
 files.match_state_with_full_record() # add state from match where state is null
 files.match_email_with_full_record()
+files.match_phone_with_full_record()
 
 #finalize column selection
 column_map = {'LEAD_ID': 'LEAD_ID',
@@ -69,18 +70,32 @@ column_map = {'LEAD_ID': 'LEAD_ID',
               'COMPANY_NAME':'CLEANED_COMPANY', # CHANGED TO COMPANY_NAME
               'EMAIL':'CLEANED_EMAIL',
               'PHONE':'CLEANED_PHONE',
-              # 'PROVIDER':'SOURCE', # CHANGED TO PROVIDER
-              # 'LEAD_TYPE': 'SUB_SOURCE', # CHANGED TO LEAD_TYPE
-              # 'UCC_DATE': 'DATE_FROM_DATA',
-              # 'PURCHASE_DATE': 'DATE_FROM_FILE_NAME', # CHANGED TO PURCHASE DATE
-              #'STATE': 'STATE_PROVENCE',
             }
 
 files.final(column_map=column_map)
-# files.aggregate()
 directory.export_table_to_file('final',
+                               order_by='company_name',
                                rows_per_file=int(OUTROWS),
-                               fname=OUTNAME,
+                               fname=f'{OUTNAME}_leads',
+                               fmt='csv',
+                               delimiter=',')
+
+directory.export_table_to_file('client_person',
+                               rows_per_file=int(OUTROWS),
+                               fname=f'{OUTNAME}_lead_person',
+                               fmt='csv',
+                               delimiter=',')
+
+directory.export_table_to_file('client_file',
+                               rows_per_file=int(OUTROWS),
+                               fname=f'{OUTNAME}_lead_file',
+                               fmt='csv',
+                               delimiter=',')
+
+directory.export_table_to_file('file_tracker',
+                               rows_per_file=int(OUTROWS),
+                               fname=f'{OUTNAME}_file_tracker',
                                fmt='csv',
                                delimiter=',')
 files.db.con.close()
+

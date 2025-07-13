@@ -26,9 +26,9 @@ class Directory:
 
         return self.files
     
-    def export_table_to_file(self,table: str='final',rows_per_file: int = 500_000, fname: str = 'output',fmt: str='csv',delimiter:str=','):
+    def export_table_to_file(self,table: str='final',order_by: str='1',rows_per_file: int = 500_000, fname: str = 'output',fmt: str='csv',delimiter:str=','):
         logger.info(f'Exporting final table to {fname} in {rows_per_file} rows per file')
-        query = f"select * from {table} order by company_name asc"
+        query = f"select * from {table} order by {order_by} asc"
         res = self.files.db.cur.execute(query)
         done = False
         c = count()

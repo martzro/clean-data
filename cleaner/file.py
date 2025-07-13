@@ -443,6 +443,9 @@ class Files:
                        )
         
     def match_state_with_full_record(self):
+        self.db.make_index('staging_full','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY)')
+        self.db.make_index('staging_state','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,state_provence)')
+
         logger.info('matching states')
         get_people_null_state = '''select distinct CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY 
                                     from staging
@@ -463,12 +466,13 @@ class Files:
                             having count(1) = 1
                                 '''
         res = self.db.cur.execute(get_people_null_state).fetchall() # need to fetch all bc single thread
-        
+        logger.info('cursor opened, iterating')
+
         for cleaned_first_name,cleaned_last_name,cleaned_company in res:
             resp = self.db.cur.execute(get_state_match,
-                                           {'cleaned_first_name':cleaned_first_name,
-                                                       'cleaned_last_name': cleaned_last_name,
-                                                       'cleaned_company': cleaned_company})
+                                        {'cleaned_first_name':cleaned_first_name,
+                                        'cleaned_last_name': cleaned_last_name,
+                                        'cleaned_company': cleaned_company})
             
             state = resp.fetchall()
             if len(state) == 1:
@@ -476,9 +480,10 @@ class Files:
                                [f"state_provence='{state[0][0]}'"],
                                ['trim(state_provence) is null',f"cleaned_first_name='{cleaned_first_name}'",
                                 f"cleaned_last_name='{cleaned_last_name}'",f"cleaned_company='{cleaned_company}'"])
-                logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added state {state}')
+                # logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added state {state}')
             # else:
             #     logger.warning(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} no state {state}')
+        logger.info('done matching state')
         return
     
     def match_email_with_full_record(self):
@@ -539,14 +544,15 @@ class Files:
                 except Exception as e:
                     logger.warning(f' {e} f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} failed to add email {email}')
                     continue
-                else:
-                    logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added email {email}')
+                # else:
+                #     logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added email {email}')
 
         self.db.con.commit()
+        logger.info('done matching emails')
         return
     
-    def match_email_with_full_record(self):
-        logger.info('matching emails')
+    def match_phone_with_full_record(self):
+        logger.info('matching phones')
         self.db.make_index('staging_phone','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_PHONE)')
         self.db.make_index('staging_email','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_EMAIL)')
         self.db.make_index('staging_record','staging(CLEANED_FIRST_NAME,CLEANED_LAST_NAME,CLEANED_COMPANY,CLEANED_EMAIL,CLEANED_PHONE)')
@@ -603,9 +609,10 @@ class Files:
                 except Exception as e:
                     logger.warning(f' {e} f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} failed to add phone {phone}')
                     continue
-                else:
-                    logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added phone {phone}')
+                # else:
+                #     logger.info(f' f:{cleaned_first_name} l:{cleaned_last_name} c:{cleaned_company} added phone {phone}')
 
+        logger.info('done matching phones')
         self.db.con.commit()
         return
 
@@ -630,6 +637,7 @@ class Files:
         logger.info(f'moving data to final table: {column_map}')
 
         self.make_lead_table() # make and populate client person table
+        self.make_file_tracker_reference_table()
         
         self.db.make_table('final', list(column_map.keys()))
         insert_statement = f"""INSERT INTO FINAL ({','.join(i for i in column_map.keys())})
@@ -690,19 +698,20 @@ class Files:
         self.db.con.commit()
 
         return
-    
+
     def populate_lead_id_column(self):
         logger.info('populating lead id column in staging')
-        self.db.update('staging',
-                       ['''lead_id=(select client_person.lead_id from client_person 
-                    join staging 
-                    on client_person.first_name=staging.cleaned_first_name
-                    and client_person.last_name=staging.cleaned_last_name
-                    and client_person.company=staging.cleaned_company)'''
-                        ],
-                    ['lead_id is null'])
-        
-    
+        sql_update = '''update staging set lead_id = ?
+                        where cleaned_first_name=?
+                        and cleaned_last_name=?
+                        and cleaned_company=?
+                    '''
+        sql_get_ids = 'select lead_id,first_name,last_name,company from client_person'
+
+        ids = self.db.cur.execute(sql_get_ids).fetchall()
+        self.db.cur.executemany(sql_update,ids)
+        self.db.con.commit()
+
     def make_lead_table(self) -> None:
         logger.info('making lead table')
         self.db.make_table('client_person',['lead_id','first_name','last_name','company_name'])
@@ -714,6 +723,27 @@ class Files:
 
         self.db.add_column_to_table('staging','lead_id','text')
         self.populate_lead_id_column()
+
+    def make_file_tracker_reference_table(self):
+        logger.info('making file tracker reference table')
+        self.db.make_table('file_tracker',['source','file','purchase_date'],'file_id')
+        self.db.make_table('client_file', ['lead_id','file_id'])
+
+        logger.info('inserting file data')
+        rows_file_tracker = self.db.cur.execute('select distinct source,file,date_from_file_name from staging').fetchall()
+        self.db.make_index('file_tracker_row','file_tracker(source,file)',True)
+        self.db.make_index('file_tracker_file','file_tracker(file)')
+
+        self.db.insert('file_tracker',['source','file','purchase_date'],rows_file_tracker)
+
+        logger.info('inserting client per file data')
+        rows_client_file = self.db.cur.execute('''select distinct a.lead_id,b.file_id
+                                               from staging a join file_tracker b
+                                                on a.source=b.source and a.file=b.file
+                                               ''').fetchall()
         
+        self.db.make_index('client_file_row','client_file(lead_id,file_id)',True)
+        self.db.insert('client_file',['lead_id','file_id'], rows_client_file)
+
         return
 

@@ -51,7 +51,7 @@ import sqlite3
 
 con = sqlite3.connect("$DB_FILE")
 cur = con.cursor()
-for table in ("staging", "final", "aggregated"):
+for table in ("staging", "final", "aggregated","client_file","client_person","file_tracker"):
     cur.execute(f"DROP TABLE IF EXISTS {table}")
 cur.execute("VACUUM")
 con.close()

@@ -58,10 +58,13 @@ class DB:
         self.con.create_function("make_lead_id",3,_function_make_lead_id)
 
 
-    def make_table(self, name: str, columns: list):
+    def make_table(self, name: str, columns: list, auto_increment_key: str|None=None):
+        col_str = ','.join([f'{column}'+' TEXT(255)' for column in columns])
+        if auto_increment_key:
+            col_str = f'{auto_increment_key} integer primary key AUTOINCREMENT,' + col_str
         query = f"""
                 CREATE TABLE IF NOT EXISTS {name} (
-                {','.join([f'{column}'+' TEXT(255)' for column in columns])}
+                {col_str}
                 )
                 """
         logger.info(query)
@@ -77,24 +80,27 @@ class DB:
 
         query = f"""{create} IF NOT EXISTS {name} on {index}"""
         logger.info(query)
-        self.cur.execute(query)
+        try:
+            self.cur.execute(query)
+        except Exception as e:
+            logger.error(f'{e} {query}')
     
 
     def add_column_to_table(self, table, column, dtype):
         query = f"""ALTER TABLE {table}
-                    ADD COLUMN IF NOT EXISTS {column} {dtype}
+                    ADD COLUMN {column} {dtype}
                 """
         try:
             self.cur.execute(query)
         except Exception as e:
-            logger.error(e)
+            logger.error(f'{e} {query}')
         else:
             self.con.commit()
 
     def insert(self, table: str, columns: list, values: list[tuple]):
         self.table_exists(table)       
         query = f"""
-                INSERT INTO {table}
+                INSERT OR IGNORE INTO {table}
                 ({','.join(column for column in columns)})
                 VALUES
                 ({','.join(['?' for i in range(len(columns))])})
@@ -103,7 +109,7 @@ class DB:
         try:
             self.cur.executemany(query, list(map(tuple, values)))
         except Exception as e:
-            logger.error(e, list(filter(lambda x: len(x) < len(columns), list(map(tuple, values))))[0],columns)
+            logger.error(e)
         self.con.commit()
         logger.info(f'inserted {len(values)} rows')
 
@@ -116,7 +122,7 @@ class DB:
                 WHERE 1=1 AND {' AND '.join(where_values)}
                 ;
                 """
-        logger.info(query)
+        # logger.info(query)
         self.cur.execute(query)
         self.con.commit()
 

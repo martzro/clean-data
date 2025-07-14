@@ -33,8 +33,8 @@ def _function_title_string(text):
         return None
     return str(text).title()
 
-def _function_re_sub(pattern,string):
-    return re.sub(pattern=pattern,string=string,repl='')
+def _function_re_sub(pattern,string,repl:str=''):
+    return re.sub(pattern=pattern,string=string,repl=repl)
 
 def _function_make_lead_id(first_name,last_name,company) -> int:
     lead_id = abs(hash((first_name,last_name,company)))
@@ -54,7 +54,7 @@ class DB:
         self.con.create_function("parsePhone", 1, _function_extract_numbers_format_phone)
         self.con.create_function("parseEmail", 1, _function_clean_email_address)
         self.con.create_function("title", 1, _function_title_string)
-        self.con.create_function("reSub", 2, _function_re_sub)
+        self.con.create_function("reSub", 3, _function_re_sub)
         self.con.create_function("make_lead_id",3,_function_make_lead_id)
 
 

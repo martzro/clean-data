@@ -221,8 +221,8 @@ class File:
 class Files:
     def __init__(self, files: list[File]):
         self.files = files
-        self.person_title_remove_regex = r'^(?:MR|MRS|MS|DR)\.?\s*|[^a-zA-Z\s]'
-        self.replace_non_alnum_single_space = r"[^a-zA-Z0-9]+|\s{2,}" 
+        self.person_title_remove_regex = r'^(?:MR|MRS|MS|DR)\.?\s*|[^a-zA-Z\s]|[\r\t\n]'
+        self.replace_non_alnum_single_space = r"[^a-zA-Z0-9]+|\s{2,}"
         self.number_regex = r"[^\d]" 
 
     def add_file(self, file: File):
@@ -335,6 +335,7 @@ class Files:
                                                     reSub(
                                                         '{self.person_title_remove_regex}'
                                                         ,upper({column})
+                                                        ,''
                                                         )
                                                     )
                                                 )
@@ -362,9 +363,9 @@ class Files:
         set_values = [f"""{new_column} = REPLACE(
                                             UPPER(
                                                 TRIM(
-                                                    REGEX_REPLACE(
+                                                    reSub(
                                                         '{self.replace_non_alnum_single_space}'
-                                                        ,{column}
+                                                        ,upper({column})
                                                         , ' ' -- WE REMOVE SPACE SO NEED TO ADD BACK
                                                     )
                                                 )
@@ -681,7 +682,7 @@ class Files:
 
     def populate_lead_table(self) -> None:
         logger.info('populating lead table')
-        sql_insert = '''insert or ignore into client_person(lead_id,first_name,last_name,company)
+        sql_insert = '''insert or ignore into client_person(lead_id,first_name,last_name,company_name)
         values (?,?,?,?)'''
 
         sql_get_data = '''
@@ -706,7 +707,7 @@ class Files:
                         and cleaned_last_name=?
                         and cleaned_company=?
                     '''
-        sql_get_ids = 'select lead_id,first_name,last_name,company from client_person'
+        sql_get_ids = 'select lead_id,first_name,last_name,company_name from client_person'
 
         ids = self.db.cur.execute(sql_get_ids).fetchall()
         self.db.cur.executemany(sql_update,ids)

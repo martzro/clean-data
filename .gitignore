@@ -3,6 +3,6 @@ data/
 *.db
 output/
 archive/
+prev/
 DEMANDS
 logs.*
-prev/
